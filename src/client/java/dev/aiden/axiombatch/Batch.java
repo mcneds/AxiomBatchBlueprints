@@ -9,6 +9,7 @@ import java.io.BufferedOutputStream;
 import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -26,6 +27,7 @@ final class Batch {
     private final Minecraft client;
     private final AxiomRuntime axiom = new AxiomRuntime();
     private final Deque<Job> jobs = new ArrayDeque<>();
+    private final Set<String> reservedOutputs = new HashSet<>();
     private final Path outputRoot;
     private final int total;
 
@@ -157,10 +159,11 @@ final class Batch {
                 .sorted(Comparator.comparing(Path::toString))
                 .forEach(path -> {
                     Path relative = inputRoot.relativize(path);
-                    Path output = replaceExtension(
+                    Path requested = replaceExtension(
                         outputRoot.resolve(relative),
                         ".bp"
                     );
+                    Path output = uniqueOutputPath(requested);
 
                     jobs.add(new Job(
                         path,
@@ -172,8 +175,6 @@ final class Batch {
     }
 
     private void addSelectedFiles(List<Path> selectedFiles) {
-        Set<String> reservedOutputNames = new HashSet<>();
-
         for (Path file : selectedFiles) {
             if (!Files.isRegularFile(file)
                 || !AxiomBatchBlueprintsClient.isSchematic(file)) {
@@ -183,30 +184,41 @@ final class Batch {
             String stem = AxiomBatchBlueprintsClient.stripSchem(
                 file.getFileName().toString()
             );
-            String outputName = uniqueOutputName(stem, reservedOutputNames);
+            Path output = uniqueOutputPath(
+                outputRoot.resolve(stem + ".bp")
+            );
 
             jobs.add(new Job(
                 file,
-                outputRoot.resolve(outputName),
+                output,
                 title(stem.replace('_', ' '))
             ));
         }
     }
 
-    private static String uniqueOutputName(
-        String stem,
-        Set<String> reserved
-    ) {
-        String candidate = stem + ".bp";
+    private Path uniqueOutputPath(Path requested) {
+        Path parent = requested.getParent();
+        String name = requested.getFileName().toString();
+        String stem = name.toLowerCase(Locale.ROOT).endsWith(".bp")
+            ? name.substring(0, name.length() - 3)
+            : name;
 
-        if (reserved.add(candidate.toLowerCase(Locale.ROOT))) return candidate;
-
+        Path candidate = requested;
         int suffix = 2;
-        do {
-            candidate = stem + "_" + suffix++ + ".bp";
-        } while (!reserved.add(candidate.toLowerCase(Locale.ROOT)));
+
+        while (Files.exists(candidate) || !reserve(candidate)) {
+            candidate = parent.resolve(stem + "_" + suffix++ + ".bp");
+        }
 
         return candidate;
+    }
+
+    private boolean reserve(Path output) {
+        String key = output.toAbsolutePath()
+            .normalize()
+            .toString()
+            .toLowerCase(Locale.ROOT);
+        return reservedOutputs.add(key);
     }
 
     private Object load(Path file) throws Exception {
@@ -242,7 +254,11 @@ final class Batch {
         Files.createDirectories(active.output().getParent());
 
         try (OutputStream out = new BufferedOutputStream(
-            Files.newOutputStream(active.output())
+            Files.newOutputStream(
+                active.output(),
+                StandardOpenOption.CREATE_NEW,
+                StandardOpenOption.WRITE
+            )
         )) {
             axiom.write(
                 out,
