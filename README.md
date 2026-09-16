@@ -1,21 +1,21 @@
 # AxiomBatchBlueprints
 
-A small Fabric client companion mod for **Minecraft 26.2 + Axiom** that batch-converts Sponge `.schem` files into native Axiom `.bp` blueprints **using Axiom's own thumbnail renderer**.
+A Fabric client companion mod for **Minecraft 26.2 + Axiom** that batch-converts Sponge `.schem` files into native Axiom `.bp` blueprints **using Axiom's own thumbnail renderer**.
 
-This exists because generic schematic converters can write valid `.bp` files, but typically embed a placeholder thumbnail. Axiom's Blueprint Browser expects the rendered thumbnail to already be stored inside the blueprint.
+Generic schematic converters can write valid `.bp` files, but they usually embed a placeholder thumbnail. This mod runs inside Minecraft and invokes Axiom's own runtime rendering/writing path instead.
 
 ## What it does
 
-The mod runs inside Minecraft and uses Axiom's runtime implementation to:
+For each `.schem`, the mod uses Axiom to:
 
-1. load each Sponge `.schem`,
-2. render the same 960 px transparent preview Axiom uses for Create Blueprint,
+1. load the Sponge schematic,
+2. render the same 960 px transparent preview used by Create Blueprint,
 3. crop/downsample it to Axiom's 96×96 thumbnail,
-4. write a native `.bp` using Axiom's own `BlueprintIo`.
+4. write a native `.bp` with Axiom's own `BlueprintIo`.
 
-No mouse automation, file-dialog automation, or external renderer is used.
+No mouse automation, file dialogs, or external renderer are used.
 
-## Current target
+## Target
 
 - Minecraft **26.2**
 - Java **25**
@@ -23,7 +23,7 @@ No mouse automation, file-dialog automation, or external renderer is used.
 - Fabric API **0.156.0+26.2**
 - Axiom **5.5.0**
 
-The integration intentionally uses reflection for Axiom internals so the project does not need to compile directly against Axiom's private/internal class graph.
+Axiom integration is resolved reflectively at runtime so the project does not need to compile directly against Axiom's internal dependency graph.
 
 ## Build
 
@@ -37,7 +37,7 @@ The first local build downloads Gradle 9.5.1 into `.gradle-bootstrap/`.
 Output:
 
 ```text
-build/libs/axiom-batch-blueprints-0.2.0.jar
+build/libs/axiom-batch-blueprints-0.3.0.jar
 ```
 
 GitHub Actions also builds the project on pushes and pull requests.
@@ -46,44 +46,147 @@ GitHub Actions also builds the project on pushes and pull requests.
 
 Copy the built JAR into the same Fabric instance's `mods/` directory as Axiom and Fabric API.
 
-## Current batch layout
+## Usage
 
-The current command looks below `config/axiom/blueprints/` for a folder named:
+All relative paths are resolved under:
 
 ```text
-tree_schems_for_schemconvert/
+config/axiom/blueprints/
+```
+
+Convert a directory recursively:
+
+```text
+/axiombatchbp run "Trees/Dead/source"
+```
+
+With no output argument, that creates a sibling directory named:
+
+```text
+Trees/Dead/source_bp/
+```
+
+Choose an explicit output directory:
+
+```text
+/axiombatchbp run "Trees/Dead/source" "Trees/Dead/NativeBP"
+```
+
+Absolute paths are also accepted.
+
+You can also convert a single schematic:
+
+```text
+/axiombatchbp run "Trees/Dead/oak.schem"
+```
+
+or choose its exact BP filename:
+
+```text
+/axiombatchbp run "Trees/Dead/oak.schem" "Trees/Dead/oak_custom.bp"
+```
+
+Directory structure is preserved. For example:
+
+```text
+source/
 ├── dark/
-└── pale_no_birch/
+│   └── large.schem
+└── pale/
+    └── large.schem
 ```
 
-It writes native blueprints to a sibling folder:
+becomes:
 
 ```text
-NativeBP/
+source_bp/
 ├── dark/
-└── pale_no_birch/
+│   └── large.bp
+└── pale/
+    └── large.bp
 ```
 
-Then, in-game:
+By default the displayed Axiom blueprint names include their parent folders, so those become `Dark - Large` and `Pale - Large` instead of two indistinguishable `Large` entries.
 
-```text
-/axiombatchbp
-```
-
-Optional commands:
+## Batch controls
 
 ```text
 /axiombatchbp status
 /axiombatchbp cancel
 ```
 
-The generated blueprints force `ContainsAir = false`, which is useful for Stamp assets because empty schematic space should not carve air into existing terrain.
+Running `/axiombatchbp` with no subcommand prints command help instead of automatically converting a hard-coded folder.
+
+## Configuration
+
+Current settings:
+
+```text
+/axiombatchbp config
+```
+
+Change thumbnail angle:
+
+```text
+/axiombatchbp config yaw 135
+/axiombatchbp config pitch 30
+```
+
+Control whether schematic air is meaningful when stamping:
+
+```text
+/axiombatchbp config containsAir false
+```
+
+Control existing output files:
+
+```text
+/axiombatchbp config overwrite true
+```
+
+Enable or disable recursive directory scanning:
+
+```text
+/axiombatchbp config recursive true
+```
+
+Include parent folder names in the Axiom display name:
+
+```text
+/axiombatchbp config folderNames true
+```
+
+Reset defaults:
+
+```text
+/axiombatchbp config reset
+```
+
+Settings persist in:
+
+```text
+config/axiom-batch-blueprints.properties
+```
+
+Default values are:
+
+```properties
+yaw=135.0
+pitch=30.0
+containsAir=false
+overwrite=true
+recursive=true
+folderNames=true
+```
+
+For Stamp assets, `containsAir=false` is generally preferable because empty schematic space will not carve air into existing terrain.
 
 ## Why the renderer matches Axiom
 
-Axiom's own preview path renders a `BlueprintPreview` at 960 px with a transparent background, then converts/crops it to a 96×96 `NativeImage` before writing the blueprint. This mod invokes that same runtime path instead of trying to reproduce Minecraft block rendering externally.
+Axiom's own preview path renders a `BlueprintPreview` at 960 px with a transparent background, then converts/crops it to a 96×96 native image before writing the blueprint. This mod invokes that same runtime path rather than reproducing Minecraft block rendering externally.
 
-Relevant Axiom code:
+Relevant Axiom classes include:
+
 - `BlueprintPreview`
 - `BlueprintCreateWindow`
 - `BlueprintIo`
@@ -91,4 +194,4 @@ Relevant Axiom code:
 
 ## Status
 
-Early/experimental. The current version is being tested specifically against Minecraft 26.2 and Axiom 5.5.0.
+Early/experimental. Currently tested against Minecraft 26.2 and Axiom 5.5.0.
