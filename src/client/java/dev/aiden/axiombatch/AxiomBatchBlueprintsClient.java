@@ -84,10 +84,7 @@ public final class AxiomBatchBlueprintsClient implements ClientModInitializer {
                     ));
 
                     try {
-                        Path firstParent = selected.getFirst().getParent();
-                        String defaultDestination = firstParent == null
-                            ? blueprintRoot().toString()
-                            : firstParent.toString();
+                        String defaultDestination = blueprintRoot().toString();
 
                         axiom.openFolderDialog(defaultDestination)
                             .whenComplete((destination, folderError) ->
