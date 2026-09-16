@@ -1,7 +1,5 @@
 package dev.aiden.axiombatch;
 
-import com.mojang.brigadier.arguments.BoolArgumentType;
-import com.mojang.brigadier.arguments.FloatArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 
 import net.fabricmc.api.ClientModInitializer;
@@ -10,6 +8,7 @@ import net.fabricmc.fabric.api.client.command.v2.ClientCommands;
 import net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.loader.api.FabricLoader;
+
 import net.minecraft.client.Minecraft;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.NbtAccounter;
@@ -17,125 +16,66 @@ import net.minecraft.nbt.NbtIo;
 import net.minecraft.network.chat.Component;
 
 import java.io.BufferedOutputStream;
-import java.io.IOException;
-import java.io.InputStream;
 import java.io.OutputStream;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.*;
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Comparator;
+import java.util.Deque;
+import java.util.List;
+import java.util.Locale;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.stream.Stream;
 
 public final class AxiomBatchBlueprintsClient implements ClientModInitializer {
-    private static final String CONFIG_FILE = "axiom-batch-blueprints.properties";
+    private static final float THUMBNAIL_YAW = 135.0F;
+    private static final float THUMBNAIL_PITCH = 30.0F;
+
     private static Batch batch;
-    private static Settings settings;
+    private static boolean choosingFolders = false;
 
     @Override
     public void onInitializeClient() {
-        settings = Settings.load();
-
         ClientCommandRegistrationCallback.EVENT.register((dispatcher, registryAccess) ->
             dispatcher.register(ClientCommands.literal("axiombatchbp")
-                .executes(ctx -> {
-                    sendHelp(ctx.getSource());
-                    return 1;
-                })
-                .then(ClientCommands.literal("run")
-                    .then(ClientCommands.argument("input", StringArgumentType.string())
+                // No arguments: use Axiom's native system folder picker twice.
+                .executes(ctx -> chooseFolders(ctx.getSource()))
+
+                // Explicit form:
+                // /axiombatchbp "<source directory>" "<destination directory>"
+                .then(ClientCommands.argument("source", StringArgumentType.string())
+                    .then(ClientCommands.argument("destination", StringArgumentType.string())
                         .executes(ctx -> startBatch(
                             ctx.getSource(),
-                            StringArgumentType.getString(ctx, "input"),
-                            null
+                            resolvePath(StringArgumentType.getString(ctx, "source")),
+                            resolvePath(StringArgumentType.getString(ctx, "destination"))
                         ))
-                        .then(ClientCommands.argument("output", StringArgumentType.string())
-                            .executes(ctx -> startBatch(
-                                ctx.getSource(),
-                                StringArgumentType.getString(ctx, "input"),
-                                StringArgumentType.getString(ctx, "output")
-                            ))
-                        )
                     )
                 )
-                .then(ClientCommands.literal("status").executes(ctx -> {
-                    ctx.getSource().sendFeedback(Component.literal(
-                        batch == null ? "No batch started" : batch.status()
-                    ));
-                    return 1;
-                }))
-                .then(ClientCommands.literal("cancel").executes(ctx -> {
-                    if (batch != null) {
-                        batch.cancel();
-                    }
-                    ctx.getSource().sendFeedback(Component.literal("Batch cancelled"));
-                    return 1;
-                }))
-                .then(ClientCommands.literal("config")
+
+                .then(ClientCommands.literal("status")
                     .executes(ctx -> {
-                        ctx.getSource().sendFeedback(Component.literal(settings.summary()));
+                        ctx.getSource().sendFeedback(Component.literal(
+                            batch == null ? "No batch started" : batch.status()
+                        ));
                         return 1;
                     })
-                    .then(ClientCommands.literal("yaw")
-                        .then(ClientCommands.argument("value", FloatArgumentType.floatArg(-180.0F, 180.0F))
-                            .executes(ctx -> {
-                                settings.yaw = FloatArgumentType.getFloat(ctx, "value");
-                                return saveSettings(ctx.getSource(), "yaw=" + settings.yaw);
-                            })
-                        )
-                    )
-                    .then(ClientCommands.literal("pitch")
-                        .then(ClientCommands.argument("value", FloatArgumentType.floatArg(-90.0F, 90.0F))
-                            .executes(ctx -> {
-                                settings.pitch = FloatArgumentType.getFloat(ctx, "value");
-                                return saveSettings(ctx.getSource(), "pitch=" + settings.pitch);
-                            })
-                        )
-                    )
-                    .then(ClientCommands.literal("containsAir")
-                        .then(ClientCommands.argument("value", BoolArgumentType.bool())
-                            .executes(ctx -> {
-                                settings.containsAir = BoolArgumentType.getBool(ctx, "value");
-                                return saveSettings(ctx.getSource(), "containsAir=" + settings.containsAir);
-                            })
-                        )
-                    )
-                    .then(ClientCommands.literal("overwrite")
-                        .then(ClientCommands.argument("value", BoolArgumentType.bool())
-                            .executes(ctx -> {
-                                settings.overwrite = BoolArgumentType.getBool(ctx, "value");
-                                return saveSettings(ctx.getSource(), "overwrite=" + settings.overwrite);
-                            })
-                        )
-                    )
-                    .then(ClientCommands.literal("recursive")
-                        .then(ClientCommands.argument("value", BoolArgumentType.bool())
-                            .executes(ctx -> {
-                                settings.recursive = BoolArgumentType.getBool(ctx, "value");
-                                return saveSettings(ctx.getSource(), "recursive=" + settings.recursive);
-                            })
-                        )
-                    )
-                    .then(ClientCommands.literal("folderNames")
-                        .then(ClientCommands.argument("value", BoolArgumentType.bool())
-                            .executes(ctx -> {
-                                settings.folderNames = BoolArgumentType.getBool(ctx, "value");
-                                return saveSettings(ctx.getSource(), "folderNames=" + settings.folderNames);
-                            })
-                        )
-                    )
-                    .then(ClientCommands.literal("reset")
-                        .executes(ctx -> {
-                            settings = new Settings();
-                            settings.save();
-                            ctx.getSource().sendFeedback(Component.literal(
-                                "Reset AxiomBatchBP settings: " + settings.summary()
-                            ));
-                            return 1;
-                        })
-                    )
+                )
+
+                .then(ClientCommands.literal("cancel")
+                    .executes(ctx -> {
+                        if (batch != null) {
+                            batch.cancel();
+                        }
+                        ctx.getSource().sendFeedback(Component.literal("Batch cancelled"));
+                        return 1;
+                    })
                 )
             )
         );
@@ -147,47 +87,131 @@ public final class AxiomBatchBlueprintsClient implements ClientModInitializer {
         });
     }
 
+    private static int chooseFolders(FabricClientCommandSource source) {
+        if (batch != null && batch.running) {
+            source.sendError(Component.literal(
+                "A batch is already running. Use /axiombatchbp status or /axiombatchbp cancel."
+            ));
+            return 0;
+        }
+
+        if (choosingFolders) {
+            source.sendError(Component.literal("A folder picker is already open."));
+            return 0;
+        }
+
+        choosingFolders = true;
+        Minecraft client = Minecraft.getInstance();
+
+        try {
+            Axiom axiom = new Axiom();
+            String defaultPath = blueprintRoot().toString();
+
+            source.sendFeedback(Component.literal("Choose source schematic folder..."));
+
+            axiom.openFolderDialog(defaultPath).thenAccept(sourcePath -> {
+                // AsyncFileDialogs clears its internal "dialog open" state only
+                // after completing the first future. Scheduling onto the client
+                // thread ensures the second picker is opened afterward.
+                client.submit(() -> {
+                    if (sourcePath == null) {
+                        choosingFolders = false;
+                        source.sendFeedback(Component.literal("Folder selection cancelled."));
+                        return;
+                    }
+
+                    source.sendFeedback(Component.literal("Choose destination blueprint folder..."));
+
+                    try {
+                        String destinationDefault = Path.of(sourcePath)
+                            .toAbsolutePath()
+                            .normalize()
+                            .getParent() == null
+                                ? defaultPath
+                                : Path.of(sourcePath)
+                                    .toAbsolutePath()
+                                    .normalize()
+                                    .getParent()
+                                    .toString();
+
+                        axiom.openFolderDialog(destinationDefault).thenAccept(destinationPath ->
+                            client.submit(() -> {
+                                choosingFolders = false;
+
+                                if (destinationPath == null) {
+                                    source.sendFeedback(Component.literal(
+                                        "Folder selection cancelled."
+                                    ));
+                                    return;
+                                }
+
+                                startBatch(
+                                    source,
+                                    Path.of(sourcePath).toAbsolutePath().normalize(),
+                                    Path.of(destinationPath).toAbsolutePath().normalize()
+                                );
+                            })
+                        );
+                    } catch (Throwable t) {
+                        choosingFolders = false;
+                        t.printStackTrace();
+                        source.sendError(Component.literal(
+                            "Could not open destination folder picker: " + rootMessage(t)
+                        ));
+                    }
+                });
+            });
+
+            return 1;
+        } catch (Throwable t) {
+            choosingFolders = false;
+            t.printStackTrace();
+            source.sendError(Component.literal(
+                "Could not open folder picker: " + rootMessage(t)
+            ));
+            return 0;
+        }
+    }
+
     private static int startBatch(
         FabricClientCommandSource source,
-        String inputRaw,
-        String outputRaw
+        Path input,
+        Path output
     ) {
         if (batch != null && batch.running) {
             source.sendError(Component.literal(
-                "A batch is already running. Use /axiombatchbp status or cancel."
+                "A batch is already running. Use /axiombatchbp status or /axiombatchbp cancel."
             ));
             return 0;
         }
 
-        Path blueprintRoot = blueprintRoot();
-        Path input = resolvePath(blueprintRoot, inputRaw);
-
-        if (!Files.exists(input)) {
-            source.sendError(Component.literal("Input does not exist: " + input));
+        if (!Files.isDirectory(input)) {
+            source.sendError(Component.literal(
+                "Source must be an existing directory: " + input
+            ));
             return 0;
         }
 
-        Path output;
-        if (outputRaw != null) {
-            output = resolvePath(blueprintRoot, outputRaw);
-        } else if (Files.isDirectory(input)) {
-            output = input.resolveSibling(input.getFileName().toString() + "_bp");
-        } else {
-            String stem = stripSchem(input.getFileName().toString());
-            output = input.resolveSibling(stem + ".bp");
+        if (Files.exists(output) && !Files.isDirectory(output)) {
+            source.sendError(Component.literal(
+                "Destination must be a directory: " + output
+            ));
+            return 0;
         }
 
         try {
+            Files.createDirectories(output);
+
             batch = new Batch(
                 Minecraft.getInstance(),
                 input,
-                output,
-                settings.copy()
+                output
             );
+
             source.sendFeedback(Component.literal(
-                "Started: " + batch.total + " schematic(s), " +
-                batch.skipped + " skipped -> " + output
+                "Started: " + batch.total + " schematic(s) -> " + output
             ));
+
             return 1;
         } catch (Throwable t) {
             t.printStackTrace();
@@ -198,36 +222,9 @@ public final class AxiomBatchBlueprintsClient implements ClientModInitializer {
         }
     }
 
-    private static int saveSettings(FabricClientCommandSource source, String changed) {
-        try {
-            settings.save();
-            source.sendFeedback(Component.literal(
-                "Set " + changed + " | " + settings.summary()
-            ));
-            return 1;
-        } catch (Throwable t) {
-            t.printStackTrace();
-            source.sendError(Component.literal(
-                "Could not save settings: " + rootMessage(t)
-            ));
-            return 0;
-        }
-    }
-
-    private static void sendHelp(FabricClientCommandSource source) {
-        source.sendFeedback(Component.literal(
-            "AxiomBatchBP commands:\n" +
-            "/axiombatchbp run \"<input>\" [\"<output>\"]\n" +
-            "/axiombatchbp status | cancel\n" +
-            "/axiombatchbp config\n" +
-            "/axiombatchbp config yaw|pitch <number>\n" +
-            "/axiombatchbp config containsAir|overwrite|recursive|folderNames <true|false>\n" +
-            "Relative paths are under config/axiom/blueprints."
-        ));
-    }
-
     private static Path blueprintRoot() {
-        return FabricLoader.getInstance().getGameDir()
+        return FabricLoader.getInstance()
+            .getGameDir()
             .resolve("config")
             .resolve("axiom")
             .resolve("blueprints")
@@ -235,9 +232,9 @@ public final class AxiomBatchBlueprintsClient implements ClientModInitializer {
             .normalize();
     }
 
-    private static Path resolvePath(Path blueprintRoot, String raw) {
+    private static Path resolvePath(String raw) {
         Path path = Path.of(raw);
-        return (path.isAbsolute() ? path : blueprintRoot.resolve(path))
+        return (path.isAbsolute() ? path : blueprintRoot().resolve(path))
             .toAbsolutePath()
             .normalize();
     }
@@ -246,7 +243,9 @@ public final class AxiomBatchBlueprintsClient implements ClientModInitializer {
         while (t.getCause() != null) {
             t = t.getCause();
         }
-        return t.getMessage() == null ? t.getClass().getSimpleName() : t.getMessage();
+        return t.getMessage() == null
+            ? t.getClass().getSimpleName()
+            : t.getMessage();
     }
 
     private static String stripSchem(String name) {
@@ -255,111 +254,48 @@ public final class AxiomBatchBlueprintsClient implements ClientModInitializer {
             : name;
     }
 
-    private static final class Settings {
-        float yaw = 135.0F;
-        float pitch = 30.0F;
-        boolean containsAir = false;
-        boolean overwrite = true;
-        boolean recursive = true;
-        boolean folderNames = true;
-
-        static Settings load() {
-            Settings out = new Settings();
-            Path file = configPath();
-
-            if (!Files.isRegularFile(file)) {
-                return out;
-            }
-
-            Properties p = new Properties();
-            try (InputStream in = Files.newInputStream(file)) {
-                p.load(in);
-                out.yaw = parseFloat(p.getProperty("yaw"), out.yaw);
-                out.pitch = parseFloat(p.getProperty("pitch"), out.pitch);
-                out.containsAir = parseBool(p.getProperty("containsAir"), out.containsAir);
-                out.overwrite = parseBool(p.getProperty("overwrite"), out.overwrite);
-                out.recursive = parseBool(p.getProperty("recursive"), out.recursive);
-                out.folderNames = parseBool(p.getProperty("folderNames"), out.folderNames);
-            } catch (Throwable t) {
-                t.printStackTrace();
-            }
-
-            return out;
-        }
-
-        void save() {
-            Properties p = new Properties();
-            p.setProperty("yaw", Float.toString(yaw));
-            p.setProperty("pitch", Float.toString(pitch));
-            p.setProperty("containsAir", Boolean.toString(containsAir));
-            p.setProperty("overwrite", Boolean.toString(overwrite));
-            p.setProperty("recursive", Boolean.toString(recursive));
-            p.setProperty("folderNames", Boolean.toString(folderNames));
-
-            Path file = configPath();
-            try {
-                Files.createDirectories(file.getParent());
-                try (OutputStream out = Files.newOutputStream(file)) {
-                    p.store(out, "AxiomBatchBlueprints settings");
-                }
-            } catch (IOException e) {
-                throw new RuntimeException(e);
-            }
-        }
-
-        Settings copy() {
-            Settings out = new Settings();
-            out.yaw = yaw;
-            out.pitch = pitch;
-            out.containsAir = containsAir;
-            out.overwrite = overwrite;
-            out.recursive = recursive;
-            out.folderNames = folderNames;
-            return out;
-        }
-
-        String summary() {
-            return "yaw=" + yaw +
-                ", pitch=" + pitch +
-                ", containsAir=" + containsAir +
-                ", overwrite=" + overwrite +
-                ", recursive=" + recursive +
-                ", folderNames=" + folderNames;
-        }
-
-        private static float parseFloat(String raw, float fallback) {
-            if (raw == null) return fallback;
-            try {
-                return Float.parseFloat(raw);
-            } catch (NumberFormatException e) {
-                return fallback;
-            }
-        }
-
-        private static boolean parseBool(String raw, boolean fallback) {
-            return raw == null ? fallback : Boolean.parseBoolean(raw);
-        }
-
-        private static Path configPath() {
-            return FabricLoader.getInstance().getConfigDir()
-                .resolve(CONFIG_FILE);
-        }
-    }
-
     private record Job(Path in, Path out, String name) {}
 
-    /** Runtime-only access to Axiom internals, avoiding compile-time AxiomClientAPI dependencies. */
+    /**
+     * Runtime-only access to Axiom internals.
+     *
+     * Keeping Axiom types out of this class's signatures avoids a compile-time
+     * dependency on AxiomClientAPI while still using Axiom's exact loader,
+     * renderer, native file dialogs and blueprint writer at runtime.
+     */
     private static final class Axiom {
-        final Method loadSponge, setRegion, setYaw, setPitch, render, toImage, clear, write;
-        final Constructor<?> previewCtor, headerCtor;
+        final Method loadSponge;
+        final Method setRegion;
+        final Method setYaw;
+        final Method setPitch;
+        final Method render;
+        final Method toImage;
+        final Method clear;
+        final Method write;
+        final Method openFolderDialog;
+
+        final Constructor<?> previewCtor;
+        final Constructor<?> headerCtor;
 
         Axiom() throws Exception {
-            Class<?> loader = Class.forName("com.moulberry.axiom.editor.schematic.SchematicLoader");
-            Class<?> preview = Class.forName("com.moulberry.axiom.editor.BlueprintPreview");
-            Class<?> header = Class.forName("com.moulberry.axiom.blueprint.BlueprintHeader");
-            Class<?> io = Class.forName("com.moulberry.axiom.blueprint.BlueprintIo");
+            Class<?> loader = Class.forName(
+                "com.moulberry.axiom.editor.schematic.SchematicLoader"
+            );
+            Class<?> preview = Class.forName(
+                "com.moulberry.axiom.editor.BlueprintPreview"
+            );
+            Class<?> header = Class.forName(
+                "com.moulberry.axiom.blueprint.BlueprintHeader"
+            );
+            Class<?> io = Class.forName(
+                "com.moulberry.axiom.blueprint.BlueprintIo"
+            );
+            Class<?> dialogs = Class.forName(
+                "com.moulberry.axiom.utils.AsyncFileDialogs"
+            );
 
             loadSponge = method(loader, "loadSponge", 1, true);
+
             previewCtor = preview.getConstructor();
             setRegion = method(preview, "setBlockRegion", 1, false);
             setYaw = method(preview, "setYaw", 2, false);
@@ -367,23 +303,34 @@ public final class AxiomBatchBlueprintsClient implements ClientModInitializer {
             render = method(preview, "render", 3, false);
             toImage = method(preview, "toNativeImage", 2, false);
             clear = method(preview, "clear", 0, false);
+
             write = method(io, "write", 6, true);
+            openFolderDialog = method(dialogs, "openFolderDialog", 1, true);
+
             headerCtor = Arrays.stream(header.getConstructors())
                 .filter(c -> c.getParameterCount() == 8 || c.getParameterCount() == 9)
-                .findFirst().orElseThrow();
+                .findFirst()
+                .orElseThrow();
         }
 
-        private static Method method(Class<?> c, String name, int argc, boolean isStatic)
-            throws Exception {
-            for (Method m : c.getMethods()) {
-                if (m.getName().equals(name) &&
-                    m.getParameterCount() == argc &&
-                    Modifier.isStatic(m.getModifiers()) == isStatic) {
+        private static Method method(
+            Class<?> type,
+            String name,
+            int argumentCount,
+            boolean isStatic
+        ) throws Exception {
+            for (Method m : type.getMethods()) {
+                if (m.getName().equals(name)
+                    && m.getParameterCount() == argumentCount
+                    && Modifier.isStatic(m.getModifiers()) == isStatic) {
                     m.setAccessible(true);
                     return m;
                 }
             }
-            throw new NoSuchMethodException(c.getName() + "." + name + "/" + argc);
+
+            throw new NoSuchMethodException(
+                type.getName() + "." + name + "/" + argumentCount
+            );
         }
 
         Object load(CompoundTag tag) throws Exception {
@@ -403,32 +350,48 @@ public final class AxiomBatchBlueprintsClient implements ClientModInitializer {
         }
 
         int count(Object region) throws Exception {
-            return Math.toIntExact(((Number) noArgs(region, "count")).longValue());
+            return Math.toIntExact(
+                ((Number) noArgs(region, "count")).longValue()
+            );
         }
 
         Object preview() throws Exception {
             return previewCtor.newInstance();
         }
 
-        void configure(Object p, Object r, Settings s) throws Exception {
-            setRegion.invoke(p, r);
-            setYaw.invoke(p, s.yaw, false);
-            setPitch.invoke(p, s.pitch, false);
+        void configure(Object preview, Object region) throws Exception {
+            setRegion.invoke(preview, region);
+            setYaw.invoke(preview, THUMBNAIL_YAW, false);
+            setPitch.invoke(preview, THUMBNAIL_PITCH, false);
         }
 
-        void render(Object p) throws Exception {
-            render.invoke(p, 960, false, false);
+        void render(Object preview) throws Exception {
+            render.invoke(preview, 960, false, false);
         }
 
         @SuppressWarnings("unchecked")
-        CompletableFuture<Object> image(Object p) throws Exception {
-            return (CompletableFuture<Object>) toImage.invoke(p, 96, true);
+        CompletableFuture<Object> image(Object preview) throws Exception {
+            return (CompletableFuture<Object>) toImage.invoke(
+                preview,
+                96,
+                true
+            );
         }
 
-        void clear(Object p) {
+        @SuppressWarnings("unchecked")
+        CompletableFuture<String> openFolderDialog(String defaultPath)
+            throws Exception {
+
+            return (CompletableFuture<String>) openFolderDialog.invoke(
+                null,
+                defaultPath
+            );
+        }
+
+        void clear(Object preview) {
             try {
-                if (p != null) {
-                    clear.invoke(p);
+                if (preview != null) {
+                    clear.invoke(preview);
                 }
             } catch (Throwable ignored) {
             }
@@ -436,23 +399,44 @@ public final class AxiomBatchBlueprintsClient implements ClientModInitializer {
 
         void closeImage(Object image) {
             try {
-                if (image instanceof AutoCloseable c) {
-                    c.close();
+                if (image instanceof AutoCloseable closeable) {
+                    closeable.close();
                 }
             } catch (Throwable ignored) {
             }
         }
 
-        Object header(String name, String author, int count, Settings s) throws Exception {
+        Object header(
+            String name,
+            String author,
+            int count
+        ) throws Exception {
+            // Stamp-oriented defaults:
+            // - yaw/pitch match Axiom Create Blueprint defaults
+            // - ContainsAir=false so empty schematic space does not carve terrain
             if (headerCtor.getParameterCount() == 8) {
                 return headerCtor.newInstance(
-                    name, author, List.of(),
-                    s.yaw, s.pitch, false, count, s.containsAir
+                    name,
+                    author,
+                    List.of(),
+                    THUMBNAIL_YAW,
+                    THUMBNAIL_PITCH,
+                    false,
+                    count,
+                    false
                 );
             }
+
             return headerCtor.newInstance(
-                2, name, author, List.of(),
-                s.yaw, s.pitch, false, count, s.containsAir
+                2,
+                name,
+                author,
+                List.of(),
+                THUMBNAIL_YAW,
+                THUMBNAIL_PITCH,
+                false,
+                count,
+                false
             );
         }
 
@@ -461,13 +445,24 @@ public final class AxiomBatchBlueprintsClient implements ClientModInitializer {
             Object header,
             Object image,
             Object region,
-            Object be,
+            Object blockEntities,
             Object entities
         ) throws Exception {
-            write.invoke(null, out, header, image, region, be, entities);
+            write.invoke(
+                null,
+                out,
+                header,
+                image,
+                region,
+                blockEntities,
+                entities
+            );
         }
 
-        private static Object noArgs(Object target, String name) throws Exception {
+        private static Object noArgs(
+            Object target,
+            String name
+        ) throws Exception {
             Method m = target.getClass().getMethod(name);
             m.setAccessible(true);
             return m.invoke(target);
@@ -478,96 +473,63 @@ public final class AxiomBatchBlueprintsClient implements ClientModInitializer {
         final Minecraft client;
         final Axiom axiom = new Axiom();
         final Deque<Job> jobs = new ArrayDeque<>();
+
         final Path inputRoot;
         final Path outputRoot;
-        final Settings settings;
         final int total;
-        final int skipped;
 
         int done = 0;
         boolean running = true;
+
         Job active;
-        Object clipboard, region, preview;
+        Object clipboard;
+        Object region;
+        Object preview;
         CompletableFuture<Object> future;
 
         Batch(
             Minecraft client,
-            Path input,
-            Path output,
-            Settings settings
+            Path inputRoot,
+            Path outputRoot
         ) throws Exception {
             this.client = client;
-            this.inputRoot = input;
-            this.outputRoot = output;
-            this.settings = settings;
+            this.inputRoot = inputRoot;
+            this.outputRoot = outputRoot;
 
-            int[] skippedCounter = {0};
-            collectJobs(input, output, skippedCounter);
-            this.skipped = skippedCounter[0];
+            collectJobs();
+
             this.total = jobs.size();
 
             if (total == 0) {
                 running = false;
             }
 
-            log("Ready: " + total + " schematic(s), " + skipped + " skipped");
+            log("Ready: " + total + " schematic(s)");
         }
 
-        void collectJobs(Path input, Path output, int[] skippedCounter) throws Exception {
-            if (Files.isRegularFile(input)) {
-                if (!input.getFileName().toString().toLowerCase(Locale.ROOT).endsWith(".schem")) {
-                    throw new IllegalArgumentException("Input file is not .schem: " + input);
-                }
-
-                Path out = output.getFileName().toString().toLowerCase(Locale.ROOT).endsWith(".bp")
-                    ? output
-                    : output.resolve(stripSchem(input.getFileName().toString()) + ".bp");
-
-                addJob(input, out, Path.of(input.getFileName().toString()), skippedCounter);
-                return;
-            }
-
-            if (!Files.isDirectory(input)) {
-                throw new IllegalArgumentException("Input is not a directory or .schem file: " + input);
-            }
-
-            Stream<Path> stream = settings.recursive
-                ? Files.walk(input)
-                : Files.list(input);
-
-            try (stream) {
+        void collectJobs() throws Exception {
+            try (Stream<Path> stream = Files.walk(inputRoot)) {
                 stream
                     .filter(Files::isRegularFile)
-                    .filter(p -> p.getFileName().toString().toLowerCase(Locale.ROOT).endsWith(".schem"))
+                    .filter(path -> path.getFileName()
+                        .toString()
+                        .toLowerCase(Locale.ROOT)
+                        .endsWith(".schem"))
                     .sorted(Comparator.comparing(Path::toString))
-                    .forEach(p -> {
-                        try {
-                            Path relative = input.relativize(p);
-                            Path out = replaceExtension(output.resolve(relative), ".bp");
-                            addJob(p, out, relative, skippedCounter);
-                        } catch (Exception e) {
-                            throw new RuntimeException(e);
-                        }
+                    .forEach(path -> {
+                        Path relative = inputRoot.relativize(path);
+                        Path destination = replaceExtension(
+                            outputRoot.resolve(relative),
+                            ".bp"
+                        );
+
+                        jobs.add(new Job(
+                            path,
+                            destination,
+                            displayName(relative)
+                        ));
                     });
             }
-        }
-
-        void addJob(
-            Path input,
-            Path output,
-            Path relative,
-            int[] skippedCounter
-        ) throws Exception {
-            if (Files.exists(output) && !settings.overwrite) {
-                skippedCounter[0]++;
-                return;
-            }
-
-            jobs.add(new Job(
-                input,
-                output,
-                displayName(relative, settings.folderNames)
-            ));
         }
 
         void tick() {
@@ -587,16 +549,24 @@ public final class AxiomBatchBlueprintsClient implements ClientModInitializer {
                     }
 
                     done++;
-                    log("[" + done + "/" + total + "] saved " + active.out().getFileName());
+
+                    log(
+                        "[" + done + "/" + total + "] saved " +
+                        active.out().getFileName()
+                    );
 
                     axiom.clear(preview);
+
                     active = null;
-                    clipboard = region = preview = null;
+                    clipboard = null;
+                    region = null;
+                    preview = null;
 
                     if (jobs.isEmpty()) {
                         running = false;
                         log("Complete -> " + outputRoot);
                     }
+
                     return;
                 }
 
@@ -607,6 +577,7 @@ public final class AxiomBatchBlueprintsClient implements ClientModInitializer {
                     }
 
                     active = jobs.removeFirst();
+
                     log("Rendering " + active.in());
 
                     clipboard = load(active.in());
@@ -617,7 +588,7 @@ public final class AxiomBatchBlueprintsClient implements ClientModInitializer {
                     }
 
                     preview = axiom.preview();
-                    axiom.configure(preview, region, settings);
+                    axiom.configure(preview, region);
                     axiom.render(preview);
                     future = axiom.image(preview);
                 }
@@ -630,19 +601,27 @@ public final class AxiomBatchBlueprintsClient implements ClientModInitializer {
         }
 
         Object load(Path file) throws Exception {
-            CompoundTag tag = NbtIo.readCompressed(file, NbtAccounter.unlimitedHeap());
+            CompoundTag tag = NbtIo.readCompressed(
+                file,
+                NbtAccounter.unlimitedHeap()
+            );
 
             while (tag.keySet().size() == 1) {
-                String key = tag.keySet().iterator().next();
+                Set<String> keys = tag.keySet();
+                String key = keys.iterator().next();
                 CompoundTag inner = tag.getCompoundOrEmpty(key);
+
                 if (inner.isEmpty()) {
                     break;
                 }
+
                 tag = inner;
             }
 
             if (!tag.contains("Version")) {
-                throw new IllegalArgumentException("Not a Sponge schematic: " + file);
+                throw new IllegalArgumentException(
+                    "Not a Sponge schematic: " + file
+                );
             }
 
             return axiom.load(tag);
@@ -650,6 +629,7 @@ public final class AxiomBatchBlueprintsClient implements ClientModInitializer {
 
         void save(Object image) throws Exception {
             int count = axiom.count(region);
+
             String author = client.player == null
                 ? "Unknown"
                 : client.player.getName().getString();
@@ -657,11 +637,12 @@ public final class AxiomBatchBlueprintsClient implements ClientModInitializer {
             Object header = axiom.header(
                 active.name(),
                 author,
-                count,
-                settings
+                count
             );
 
-            Files.createDirectories(active.out().getParent());
+            Files.createDirectories(
+                active.out().getParent()
+            );
 
             try (OutputStream out = new BufferedOutputStream(
                 Files.newOutputStream(active.out())
@@ -679,48 +660,66 @@ public final class AxiomBatchBlueprintsClient implements ClientModInitializer {
 
         void cancel() {
             running = false;
+
             if (future != null) {
                 future.cancel(false);
             }
+
             axiom.clear(preview);
             jobs.clear();
         }
 
         String status() {
-            return "AxiomBatchBP: " + done + "/" + total +
+            return "AxiomBatchBP: " +
+                done + "/" + total +
                 (running ? " running" : " stopped") +
-                ", skipped=" + skipped +
-                (active == null ? "" : "; " + active.in().getFileName());
+                (active == null
+                    ? ""
+                    : "; " + active.in().getFileName());
         }
 
-        static Path replaceExtension(Path path, String extension) {
+        static Path replaceExtension(
+            Path path,
+            String extension
+        ) {
             String name = path.getFileName().toString();
             String stem = stripSchem(name);
-            return path.resolveSibling(stem + extension);
+
+            return path.resolveSibling(
+                stem + extension
+            );
         }
 
-        static String displayName(Path relative, boolean folderNames) {
+        static String displayName(Path relative) {
             List<String> parts = new ArrayList<>();
 
-            if (folderNames && relative.getParent() != null) {
-                for (Path p : relative.getParent()) {
-                    parts.add(title(p.toString().replace('_', ' ')));
+            if (relative.getParent() != null) {
+                for (Path part : relative.getParent()) {
+                    parts.add(
+                        title(
+                            part.toString()
+                                .replace('_', ' ')
+                        )
+                    );
                 }
             }
 
-            parts.add(title(
-                stripSchem(relative.getFileName().toString())
-                    .replace('_', ' ')
-            ));
+            parts.add(
+                title(
+                    stripSchem(
+                        relative.getFileName().toString()
+                    ).replace('_', ' ')
+                )
+            );
 
             return String.join(" - ", parts);
         }
 
-        static String title(String s) {
+        static String title(String input) {
             StringBuilder out = new StringBuilder();
 
-            for (String w : s.trim().split("\\s+")) {
-                if (w.isEmpty()) {
+            for (String word : input.trim().split("\\s+")) {
+                if (word.isEmpty()) {
                     continue;
                 }
 
@@ -728,15 +727,22 @@ public final class AxiomBatchBlueprintsClient implements ClientModInitializer {
                     out.append(' ');
                 }
 
-                out.append(Character.toUpperCase(w.charAt(0)))
-                    .append(w.substring(1));
+                out.append(
+                    Character.toUpperCase(word.charAt(0))
+                );
+
+                if (word.length() > 1) {
+                    out.append(word.substring(1));
+                }
             }
 
             return out.toString();
         }
 
-        static void log(String s) {
-            System.out.println("[AxiomBatchBP] " + s);
+        static void log(String text) {
+            System.out.println(
+                "[AxiomBatchBP] " + text
+            );
         }
     }
 }
