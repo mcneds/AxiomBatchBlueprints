@@ -1,6 +1,5 @@
 package dev.aiden.axiombatch;
 
-import net.minecraft.Util;
 import net.minecraft.client.Minecraft;
 
 import org.lwjgl.PointerBuffer;
@@ -13,6 +12,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -43,7 +43,13 @@ final class NativeDialogs {
             }
         };
 
-        if (Util.getPlatform() == Util.OS.OSX) {
+        // Native dialogs on macOS need to be opened on the client/main thread.
+        // Avoid depending on Minecraft's moved Util class just to detect the OS.
+        boolean macOS = System.getProperty("os.name", "")
+            .toLowerCase(Locale.ROOT)
+            .contains("mac");
+
+        if (macOS) {
             Minecraft.getInstance().submit(runnable);
         } else {
             DIALOG_THREAD.submit(runnable);
