@@ -6,6 +6,7 @@
   "description": "Converts .schem files to Axiom .bp blueprints.",
   "authors": ["mcneds"],
   "license": "CC0-1.0",
+  "icon": "assets/axiombatchbp/icon.png",
   "environment": "client",
   "entrypoints": {
     "client": [
