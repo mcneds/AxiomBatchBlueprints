@@ -10,6 +10,7 @@ import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.client.Minecraft;
 import net.minecraft.network.chat.Component;
 
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
@@ -61,7 +62,7 @@ public final class AxiomBatchBlueprintsClient implements ClientModInitializer {
             AxiomRuntime axiom = new AxiomRuntime();
             source.sendFeedback(Component.literal("Choose one or more .schem files..."));
 
-            NativeDialogs.openSchematicFiles(axiom, blueprintRoot().toString())
+            NativeDialogs.openSchematicFiles(axiom, sourcePickerStart().toString())
                 .whenComplete((selected, error) -> client.submit(() -> {
                     if (error != null) {
                         choosingSources = false;
@@ -78,15 +79,15 @@ public final class AxiomBatchBlueprintsClient implements ClientModInitializer {
                         return;
                     }
 
+                    rememberSourceDirectory(selected.getFirst().getParent());
+
                     source.sendFeedback(Component.literal(
                         "Selected " + selected.size() +
                         " schematic(s). Choose destination folder..."
                     ));
 
                     try {
-                        String defaultDestination = blueprintRoot().toString();
-
-                        axiom.openFolderDialog(defaultDestination)
+                        axiom.openFolderDialog(blueprintRoot().toString())
                             .whenComplete((destination, folderError) ->
                                 client.submit(() -> {
                                     choosingSources = false;
@@ -162,6 +163,7 @@ public final class AxiomBatchBlueprintsClient implements ClientModInitializer {
 
         try {
             validateDestination(output);
+            rememberSourceDirectory(Files.isDirectory(input) ? input : input.getParent());
             batch = new Batch(Minecraft.getInstance(), input, output);
             return reportStarted(source, output);
         } catch (Throwable t) {
@@ -195,6 +197,7 @@ public final class AxiomBatchBlueprintsClient implements ClientModInitializer {
                 return 0;
             }
 
+            rememberSourceDirectory(valid.getFirst().getParent());
             batch = new Batch(Minecraft.getInstance(), valid, output);
             return reportStarted(source, output);
         } catch (Throwable t) {
@@ -262,6 +265,50 @@ public final class AxiomBatchBlueprintsClient implements ClientModInitializer {
             .resolve("blueprints")
             .toAbsolutePath()
             .normalize();
+    }
+
+    private static Path sourcePickerStart() {
+        Path fallback = blueprintRoot();
+        Path state = lastSourceState();
+
+        try {
+            if (!Files.isRegularFile(state)) return fallback;
+
+            String raw = Files.readString(state, StandardCharsets.UTF_8).trim();
+            if (raw.isEmpty()) return fallback;
+
+            Path path = Path.of(raw).toAbsolutePath().normalize();
+            return Files.isDirectory(path) ? path : fallback;
+        } catch (Throwable ignored) {
+            return fallback;
+        }
+    }
+
+    private static void rememberSourceDirectory(Path directory) {
+        if (directory == null) return;
+
+        try {
+            Path normalized = directory.toAbsolutePath().normalize();
+            if (!Files.isDirectory(normalized)) return;
+
+            Path state = lastSourceState();
+            Files.createDirectories(state.getParent());
+            Files.writeString(
+                state,
+                normalized.toString(),
+                StandardCharsets.UTF_8
+            );
+        } catch (Throwable t) {
+            System.err.println(
+                "[AxiomBatchBP] Could not remember source directory: " +
+                rootMessage(t)
+            );
+        }
+    }
+
+    private static Path lastSourceState() {
+        return FabricLoader.getInstance().getConfigDir()
+            .resolve("axiom-batch-blueprints-last-source.txt");
     }
 
     private static Path resolvePath(String raw) {
