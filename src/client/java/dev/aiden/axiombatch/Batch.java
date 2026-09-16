@@ -19,6 +19,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.function.Consumer;
 import java.util.stream.Stream;
 
 final class Batch {
@@ -29,6 +30,7 @@ final class Batch {
     private final Deque<Job> jobs = new ArrayDeque<>();
     private final Set<String> reservedOutputs = new HashSet<>();
     private final Path outputRoot;
+    private final Consumer<String> feedback;
     private final int total;
 
     private int done;
@@ -39,9 +41,15 @@ final class Batch {
     private Object preview;
     private CompletableFuture<Object> imageFuture;
 
-    Batch(Minecraft client, Path source, Path outputRoot) throws Exception {
+    Batch(
+        Minecraft client,
+        Path source,
+        Path outputRoot,
+        Consumer<String> feedback
+    ) throws Exception {
         this.client = client;
         this.outputRoot = outputRoot;
+        this.feedback = feedback;
 
         if (Files.isDirectory(source)) {
             collectDirectory(source);
@@ -54,10 +62,15 @@ final class Batch {
         log("Ready: " + total + " schematic(s)");
     }
 
-    Batch(Minecraft client, List<Path> selectedFiles, Path outputRoot)
-        throws Exception {
+    Batch(
+        Minecraft client,
+        List<Path> selectedFiles,
+        Path outputRoot,
+        Consumer<String> feedback
+    ) throws Exception {
         this.client = client;
         this.outputRoot = outputRoot;
+        this.feedback = feedback;
 
         addSelectedFiles(selectedFiles);
 
@@ -85,7 +98,9 @@ final class Batch {
             if (active == null) startNext();
         } catch (Throwable t) {
             t.printStackTrace();
+            String message = "Batch failed: " + AxiomBatchBlueprintsClient.rootMessage(t);
             log("ERROR: " + AxiomBatchBlueprintsClient.rootMessage(t));
+            feedback.accept(message);
             axiom.clearPreview(preview);
             running = false;
         }
@@ -147,7 +162,9 @@ final class Batch {
 
         if (jobs.isEmpty()) {
             running = false;
+            String message = "Finished: " + done + " schematic(s) -> " + outputRoot;
             log("Complete -> " + outputRoot);
+            feedback.accept(message);
         }
     }
 
