@@ -24,6 +24,11 @@ dependencies {
     minecraft "com.mojang:minecraft:${project.minecraft_version}"
     implementation "net.fabricmc:fabric-loader:${project.loader_version}"
     implementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
+
+    // Minecraft 26.2 supplies LWJGL 3.4.1 at runtime. These are compile-only
+    // so the mod can use NFD's native multi-file picker without bundling LWJGL.
+    compileOnly "org.lwjgl:lwjgl:3.4.1"
+    compileOnly "org.lwjgl:lwjgl-nfd:3.4.1"
 }
 
 processResources {
