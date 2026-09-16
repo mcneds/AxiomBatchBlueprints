@@ -12,7 +12,23 @@ Generic schematic converters can write valid `.bp` files, but they usually embed
 - Fabric API **0.156.0+26.2**
 - Axiom **5.5.0**
 
-## Build
+## Download
+
+You do not need to build the mod locally.
+
+Every successful build of `main` publishes a prerelease named **Latest Development Build** with a directly installable file:
+
+```text
+AxiomBatchBlueprints-latest.jar
+```
+
+Open the repository's **Releases** page and download the JAR from the latest development release. The `latest-build` release is replaced automatically whenever `main` builds successfully.
+
+Pull requests still build and expose their JAR through the workflow's Actions artifact, but they do not replace the public latest-build release.
+
+## Build locally
+
+Local builds are still available if needed:
 
 ```bash
 chmod +x build.sh
@@ -22,14 +38,12 @@ chmod +x build.sh
 Output:
 
 ```text
-build/libs/axiom-batch-blueprints-0.5.0.jar
+build/libs/axiom-batch-blueprints-0.5.1.jar
 ```
-
-GitHub Actions also builds the project on pushes and pull requests.
 
 ## Install
 
-Copy the built JAR into the same Fabric instance's `mods/` directory as Axiom and Fabric API.
+Copy the downloaded JAR into the same Fabric instance's `mods/` directory as Axiom and Fabric API.
 
 ## Usage
 
@@ -41,7 +55,11 @@ Run:
 /axiombatchbp
 ```
 
-A native system file picker opens. Select **one or multiple `.schem` files** (Ctrl/Shift multi-select as supported by your desktop), then choose a destination folder.
+A native system file picker opens. Select **one or multiple `.schem` files** (Ctrl/Shift multi-select as supported by your desktop), then choose a destination folder. The destination picker defaults to the root of Axiom's blueprint directory:
+
+```text
+config/axiom/blueprints/
+```
 
 Selected files are written directly into that destination:
 
