@@ -164,7 +164,12 @@ public final class AxiomBatchBlueprintsClient implements ClientModInitializer {
         try {
             validateDestination(output);
             rememberSourceDirectory(Files.isDirectory(input) ? input : input.getParent());
-            batch = new Batch(Minecraft.getInstance(), input, output);
+            batch = new Batch(
+                Minecraft.getInstance(),
+                input,
+                output,
+                message -> source.sendFeedback(Component.literal(message))
+            );
             return reportStarted(source, output);
         } catch (Throwable t) {
             return reportFailure(source, t);
@@ -198,7 +203,12 @@ public final class AxiomBatchBlueprintsClient implements ClientModInitializer {
             }
 
             rememberSourceDirectory(valid.getFirst().getParent());
-            batch = new Batch(Minecraft.getInstance(), valid, output);
+            batch = new Batch(
+                Minecraft.getInstance(),
+                valid,
+                output,
+                message -> source.sendFeedback(Component.literal(message))
+            );
             return reportStarted(source, output);
         } catch (Throwable t) {
             return reportFailure(source, t);
