@@ -3,8 +3,8 @@
   "id": "axiombatchbp",
   "version": "${version}",
   "name": "Axiom Batch Blueprints",
-  "description": "Batch-converts Sponge .schem files into native Axiom .bp files using Axiom's own thumbnail renderer.",
-  "authors": ["OpenAI"],
+  "description": "Converts .schem files to Axiom .bp blueprints.",
+  "authors": ["mcneds"],
   "license": "CC0-1.0",
   "environment": "client",
   "entrypoints": {
