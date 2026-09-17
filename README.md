@@ -4,14 +4,12 @@ Batch converts Sponge `.schem` files to native Axiom `.bp` blueprints and genera
 
 ## Download
 
-[Download the latest build](https://github.com/mcneds/AxiomBatchBlueprints/releases/tag/latest-build)
+Choose the release for your Minecraft version:
 
-Builds are provided for:
+- [Minecraft 26.2](https://github.com/mcneds/AxiomBatchBlueprints/releases/tag/latest-mc26.2)
+- [Minecraft 26.1.2](https://github.com/mcneds/AxiomBatchBlueprints/releases/tag/latest-mc26.1.2)
 
-- Minecraft 26.2
-- Minecraft 26.1.2
-
-Versioned releases are also kept under [Releases](https://github.com/mcneds/AxiomBatchBlueprints/releases).
+Versioned releases are kept separately as well, for example `v0.6.3-mc26.2` and `v0.6.3-mc26.1.2`.
 
 Requires Fabric API and Axiom. Put the matching JAR in your instance's `mods` folder.
 
@@ -90,4 +88,4 @@ chmod +x build.sh
 ./build.sh
 ```
 
-The default local build targets Minecraft 26.2. GitHub Actions builds both supported Minecraft versions.
+The default local build targets Minecraft 26.2. Each supported Minecraft version has its own GitHub Actions workflow and its own releases.

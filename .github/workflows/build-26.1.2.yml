@@ -1,0 +1,75 @@
+name: Build 26.1.2
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: axiom-batch-blueprints-mc26.1.2-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '25'
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.5.1'
+
+      - name: Build Minecraft 26.1.2
+        run: >-
+          gradle --no-daemon clean build
+          -Pminecraft_version=26.1.2
+          -Pminecraft_dependency='~26.1.2'
+          -Pfabric_api_version=0.154.2+26.1.2
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: jar-mc26.1.2
+          path: |
+            build/libs/axiom-batch-blueprints-*.jar
+            !build/libs/*-sources.jar
+            !build/libs/*-dev.jar
+          if-no-files-found: error
+
+      - name: Publish Minecraft 26.1.2 releases
+        if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          version="$(sed -n 's/^mod_version=//p' gradle.properties)"
+          jar="$(find build/libs -maxdepth 1 -type f -name "axiom-batch-blueprints-${version}+mc26.1.2.jar" -print -quit)"
+          test -n "$version"
+          test -n "$jar"
+
+          cp "$jar" build/libs/AxiomBatchBlueprints-latest-mc26.1.2.jar
+
+          gh release delete latest-mc26.1.2 --cleanup-tag -y || true
+          gh release create latest-mc26.1.2 \
+            build/libs/AxiomBatchBlueprints-latest-mc26.1.2.jar \
+            --target "$GITHUB_SHA" \
+            --title "Latest Build - Minecraft 26.1.2" \
+            --notes "Minecraft 26.1.2"
+
+          tag="v${version}-mc26.1.2"
+          if ! gh release view "$tag" >/dev/null 2>&1; then
+            gh release create "$tag" \
+              "$jar" \
+              --target "$GITHUB_SHA" \
+              --title "v${version} - Minecraft 26.1.2" \
+              --notes "Minecraft 26.1.2"
+          fi
